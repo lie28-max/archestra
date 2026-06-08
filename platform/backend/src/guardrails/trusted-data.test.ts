@@ -410,6 +410,61 @@ describe("trusted-data evaluation (provider-agnostic)", () => {
       });
     });
 
+    test("still evaluates Tool Result Policies when context starts untrusted", async () => {
+      // Create a block policy
+      await TrustedDataPolicyModel.create({
+        toolId,
+        conditions: [
+          { key: "emails[*].from", operator: "contains", value: "hacker" },
+        ],
+        action: "block_always",
+        description: "Block hacker emails",
+      });
+
+      const commonMessages: CommonMessage[] = [
+        { role: "user" },
+        { role: "assistant" },
+        {
+          role: "tool",
+          toolCalls: [
+            {
+              id: "call_untrusted_block",
+              name: "get_emails",
+              content: {
+                emails: [
+                  { from: "hacker@evil.com", subject: "Malicious" },
+                ],
+              },
+              isError: false,
+            },
+          ],
+        },
+        { role: "assistant" },
+      ];
+
+      const result = await evaluateIfContextIsTrusted(
+        commonMessages,
+        agentId,
+        organizationId,
+        undefined,
+        true, // considerContextUntrusted = true
+        "restrictive",
+        { teamIds: [] },
+      );
+
+      // Context should be untrusted (preexisting)
+      expect(result.contextIsTrusted).toBe(false);
+      // Tool result should be blocked by policy, not passed through raw
+      expect(result.toolResultUpdates).toEqual({
+        call_untrusted_block:
+          "[Content blocked by policy: Data blocked by policy: Block hacker emails]",
+      });
+      expect(result.unsafeContextBoundary).toEqual({
+        kind: "preexisting_untrusted",
+        reason: "agentConfiguredUntrusted",
+      });
+    });
+
     test("handles multiple tool calls with mixed trust", async () => {
       // Create policies
       await TrustedDataPolicyModel.create({
